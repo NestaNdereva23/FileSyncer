@@ -1,9 +1,10 @@
+import io
 import sys
 import os
 import shutil
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QListWidget, QLineEdit, QPushButton, 
-                             QLabel, QMessageBox, QFileDialog)
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QListWidget, QLineEdit, QPushButton,
+                             QLabel, QMessageBox, QFileDialog, QListWidgetItem)
 from PyQt5.QtCore import Qt, QUrl
 import json
 from urllib.parse import unquote 
@@ -14,6 +15,8 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseDownload
+import google.auth
 
 #Base Class
 class FileSyncer(QMainWindow):
@@ -47,12 +50,17 @@ class FileSyncer(QMainWindow):
         self.authenticate_button.clicked.connect(self.handle_authentication)
         self.buttons_layout.addWidget(self.authenticate_button)
 
-        #Sync files button
+        #Sync files button  --updates the files list
         self.sync_files_button = QPushButton("Sync Files")
         self.sync_files_button.setStyleSheet("Color: green")
         self.sync_files_button.clicked.connect(self.sync_files)
         self.buttons_layout.addWidget(self.sync_files_button)
 
+        #download files button
+        self.download_files_button = QPushButton("Download")
+        self.download_files_button.setStyleSheet("Color: red")
+        self.download_files_button.clicked.connect(self.download_file)
+        self.buttons_layout.addWidget(self.download_files_button)
         #Upload files button
         self.upload_files_button = QPushButton("Upload Files")
         self.upload_files_button.setStyleSheet("Color: green")
@@ -113,12 +121,63 @@ class FileSyncer(QMainWindow):
             self.files_list.clear()
 
             for item in items:
-                self.files_list.addItem(item['name'])
-        
+                # # self.files_list.addItem(item['name'])
+                # self.files_list.addItems([item['name'], item['id']])
+                # print(item)
+                file_item = QListWidgetItem(item['name'])
+                file_item.setData(Qt.UserRole, item['id'])
+                self.files_list.addItem(file_item)
+
         except HttpError as error:
             QMessageBox.critical(self, "Google Drive Error", f"An error occurred: {error}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to list files: {str(e)}")
+
+    def download_file(self):
+        current_file = self.files_list.currentItem()
+
+        extracted_id = ""
+        if current_file:
+            # file_name = current_file.text()
+            # print(file_name)
+            file_id = current_file.data(Qt.UserRole)
+            print(type(file_id))
+            extracted_id = file_id
+        else:
+            pass
+        creds = self.auth.credentials
+
+        #google drive download implem
+        #creds, _ = google.auth.default()
+        try:
+            #get the file metadata before downloading
+            file_metadata = self.auth.service.files().get(fileId=extracted_id).execute()
+            filename = file_metadata['name']
+            print(filename)
+            
+            # Create drive api client
+            with open(filename, 'wb') as file:
+                request = self.auth.service.files().get_media(fileId=extracted_id, supportsAllDrives=True)
+                file = io.BytesIO()
+                downloader = MediaIoBaseDownload(file, request)
+                done = False
+
+                while done is False:
+                    status, done = downloader.next_chunk()
+                    print(f"Download {int(status.progress() * 100)}%")
+
+                '''Write the data into the file'''
+                file.seek(0)
+                with open(filename, 'wb') as f:
+                    f.write(file.read())
+
+            QMessageBox.critical(self, "Download Success", f"Successfully downloaded the file {filename}")
+
+        except HttpError as error:
+            QMessageBox.critical(self, "Download Error", f"Failed to Download File: {str(error)}")
+            file = None
+
+                                        
 
 
 if __name__ == "__main__":

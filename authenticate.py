@@ -10,6 +10,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseDownload
 import time
 
 # from main import FileSyncer
@@ -21,7 +22,7 @@ class Authenticate:
         #Google Drive service and credentials
         self.service = None
         self.credentials = None
-        self.SCOPES = ["https://www.googleapis.com/auth/drive.metadata.readonly"]
+        self.SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
         self.is_authenticated = False
 
     def update_auth_status(self, is_authenticated):
