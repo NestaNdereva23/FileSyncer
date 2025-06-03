@@ -1,4 +1,5 @@
 import io
+import mimetypes
 import sys
 import os
 import shutil
@@ -15,7 +16,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 import google.auth
 
 #Base Class
@@ -61,12 +62,14 @@ class FileSyncer(QMainWindow):
         self.download_files_button.setStyleSheet("Color: red")
         self.download_files_button.clicked.connect(self.download_file)
         self.buttons_layout.addWidget(self.download_files_button)
-        #Upload files button
+
+        # Upload files button
         self.upload_files_button = QPushButton("Upload Files")
         self.upload_files_button.setStyleSheet("Color: green")
+        self.upload_files_button.clicked.connect(self.select_file)
         self.buttons_layout.addWidget(self.upload_files_button)
 
-        #Files list
+        # Files list
         self.files_list = QListWidget()
         self.files_list.setStyleSheet("QListWidget { font-size: 14px; }")
         self.main_layout.addWidget(self.files_list)
@@ -136,28 +139,18 @@ class FileSyncer(QMainWindow):
     def download_file(self):
         current_file = self.files_list.currentItem()
 
-        extracted_id = ""
         if current_file:
-            # file_name = current_file.text()
-            # print(file_name)
             file_id = current_file.data(Qt.UserRole)
-            print(type(file_id))
-            extracted_id = file_id
-        else:
-            pass
-        creds = self.auth.credentials
 
-        #google drive download implem
-        #creds, _ = google.auth.default()
+        # google drive download implem
         try:
-            #get the file metadata before downloading
-            file_metadata = self.auth.service.files().get(fileId=extracted_id).execute()
+            # get the file metadata before downloading
+            file_metadata = self.auth.service.files().get(fileId=file_id).execute()
             filename = file_metadata['name']
-            print(filename)
-            
+
             # Create drive api client
             with open(filename, 'wb') as file:
-                request = self.auth.service.files().get_media(fileId=extracted_id, supportsAllDrives=True)
+                request = self.auth.service.files().get_media(fileId=file_id, supportsAllDrives=True)
                 file = io.BytesIO()
                 downloader = MediaIoBaseDownload(file, request)
                 done = False
@@ -177,8 +170,43 @@ class FileSyncer(QMainWindow):
             QMessageBox.critical(self, "Download Error", f"Failed to Download File: {str(error)}")
             file = None
 
-                                        
+    # select a file from path
+    def select_file(self):
+        try:
+            file_path, _ = QFileDialog.getOpenFileUrl(None, "File")
+            file_url = file_path.toLocalFile()    # clean to get base file path
+            # selected_file_name = os.path.basename(file_url) # get base file name
+            if file_url:
+                self.upload_file(file_url)
 
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to select file: {str(e)}")
+
+    # upload selected File 
+    def upload_file(self, file_url):
+        print(f"ready to upload file at: {file_url}")
+        try:
+            file_name = os.path.basename(file_url)
+
+            #detect mime type
+            mime_type, _ = mimetypes.guess_type(file_url)
+            if mime_type is None:
+                mime_type = 'application/octet-stream'
+
+            print(f"Detected MIME type: {mime_type}")
+
+            file_metadata = {"name": file_name}
+            media = MediaFileUpload(file_url, mimetype=mime_type, resumable=True)
+
+            file = (
+                self.auth.service.files()
+                .create(body=file_metadata, media_body=media, fields="id")
+                .execute()
+            )
+            print(f'File with ID: "{file}" has been uploaded')
+        except HttpError as error:
+            print(f"An error occurred: {error}")
+            file = None
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
