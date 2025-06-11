@@ -3,78 +3,165 @@ import mimetypes
 import sys
 import os
 import shutil
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                             QHBoxLayout, QListWidget, QLineEdit, QPushButton,
-                             QLabel, QMessageBox, QFileDialog, QListWidgetItem)
-from PyQt5.QtCore import Qt, QUrl
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QListWidget, QPushButton, QLabel, QMessageBox, QFileDialog,
+    QListWidgetItem, QStatusBar, QMenuBar, QAction, QProgressBar
+)
+from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
 import json
 from urllib.parse import unquote 
-from authenticate import Authenticate
-
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+from authenticate import AuthManager
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
-import google.auth
+from database import DatabaseManager
+from drive_manager import DriveManager
 
 #Base Class
-class FileSyncer(QMainWindow):
+''' Habdle file operations without blocking UI '''
+class FileOperationThread(QThread):
+    progress = pyqtSignal(str)
+    finished = pyqtSignal(bool, str)
+
+    def __init__(self, operation, *args, **kwargs):
+        super().__init__()
+        self.operation = operation
+        self.args = args
+        self.kwargs = kwargs
+
+    def run(self):
+        try:
+            result = self.operation(self.args, self.kwargs)
+            self.finished.emit(True, str(result))
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
+class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.auth = Authenticate(parent=self) # create an instance of authenticate
-        
+
+        # managers
+        self.db_manager = DatabaseManager()
+        self.auth_manager = AuthManager(self.db_manager)
+        self.drive_manager = DriveManager(self.auth_manager, self.db_manager)
+
+        self.init_ui()
+        self.restore_session()
+
+    def init_ui(self):
+
         self.setWindowTitle("File Syncer")
-        self.setGeometry(100, 100, 400, 500)
+        self.setGeometry(100, 100, 800, 600)
 
         #Central widget
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
 
         #Main Layout
-        self.main_layout = QVBoxLayout()
-        self.central_widget.setLayout(self.main_layout)
+        main_layout = QVBoxLayout()
+        central_widget.setLayout(main_layout)
+
+        # Status section
+        status_layout = QHBoxLayout()
+        self.auth_status_label = QLabel("Not authenticated")
+        self.auth_status_label.setStyleSheet("color: red; font-weight: bold;")
+        self.user_info_label = QLabel("")
+        status_layout.addWidget(QLabel("Status:"))
+        status_layout.addWidget(self.auth_status_label)
+        status_layout.addWidget(self.user_info_label)
+        status_layout.addStretch()
+        main_layout.addLayout(status_layout)
 
         #Buttons layout
-        self.buttons_layout = QHBoxLayout()
-        self.main_layout.addLayout(self.buttons_layout)
+        buttons_layout = QHBoxLayout()
 
-        #Authentication status label
-        self.auth_status_label = QLabel("Not authenticated")
-        self.auth_status_label.setStyleSheet("color: red;")
-        self.main_layout.addWidget(self.auth_status_label)
+        self.auth_button = QPushButton("Authenticate")
+        self.auth_button.clicked.connect(self.handle_authentication)
 
-        self.auth.try_to_authenticate()
-        #authentiate button
-        self.authenticate_button = QPushButton("Authenticate Google Drive")
-        self.authenticate_button.clicked.connect(self.handle_authentication)
-        self.buttons_layout.addWidget(self.authenticate_button)
+        self.logout_button = QPushButton("Logout")
+        self.logout_button.clicked.connect(self.handle_logout)
+        self.logout_button.setEnabled(False)
 
-        #Sync files button  --updates the files list
-        self.sync_files_button = QPushButton("Sync Files")
-        self.sync_files_button.setStyleSheet("Color: green")
-        self.sync_files_button.clicked.connect(self.sync_files)
-        self.buttons_layout.addWidget(self.sync_files_button)
+        self.refresh_button = QPushButton("Refresh Files")
+        self.refresh_button.clicked.connect(self.refresh_files)
+        self.refresh_button.setEnabled(False)
 
-        #download files button
-        self.download_files_button = QPushButton("Download")
-        self.download_files_button.setStyleSheet("Color: red")
-        self.download_files_button.clicked.connect(self.download_file)
-        self.buttons_layout.addWidget(self.download_files_button)
+        self.upload_button = QPushButton("Upload File")
+        self.upload_button.clicked.connect(self.upload_file)
+        self.upload_button.setEnabled(False)
 
-        # Upload files button
-        self.upload_files_button = QPushButton("Upload Files")
-        self.upload_files_button.setStyleSheet("Color: green")
-        self.upload_files_button.clicked.connect(self.select_file)
-        self.buttons_layout.addWidget(self.upload_files_button)
+        self.download_button = QPushButton("Download Selected")
+        self.download_button.clicked.connect(self.download_selected_file)
+        self.download_button.setEnabled(False)
+
+        buttons_layout.addWidget(self.auth_button)
+        buttons_layout.addWidget(self.logout_button)
+        buttons_layout.addWidget(self.refresh_button)
+        buttons_layout.addWidget(self.upload_button)
+        buttons_layout.addWidget(self.download_button)
+
+        main_layout.addLayout(buttons_layout)
 
         # Files list
         self.files_list = QListWidget()
-        self.files_list.setStyleSheet("QListWidget { font-size: 14px; }")
-        self.main_layout.addWidget(self.files_list)
+        self.files_list.setStyleSheet("QListWidget { font-size: 12px; }")
+        self.files_list.itemSelectionChanged.connect(self.on_file_selection_changed)
+        main_layout.addWidget(self.files_list)
 
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        main_layout.addWidget(self.progress_bar)
 
+        # Status bar
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Ready")
+
+    def create_menu_bar(self):
+        """Create application menu bar"""
+        menubar = self.menuBar()
+
+        # File menu
+        file_menu = menubar.addMenu('File')
+
+        auth_action = QAction('Authenticate', self)
+        auth_action.triggered.connect(self.handle_authentication)
+        file_menu.addAction(auth_action)
+
+        logout_action = QAction('Logout', self)
+        logout_action.triggered.connect(self.handle_logout)
+        file_menu.addAction(logout_action)
+
+        file_menu.addSeparator()
+
+        exit_action = QAction('Exit', self)
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+    def restore_session(self):
+        """Try to restore previous user session"""
+        if self.auth_manager.initialize_session():
+            self.update_ui_authenticated(True)
+            self.load_files()
+            self.status_bar.showMessage("Session restored successfully")
+        else:
+            self.update_ui_authenticated(False)
+            self.status_bar.showMessage("No previous session found")
+
+    def handle_logout(self):
+        pass
+
+    def refresh_files(self):
+        pass
+    def download_selected_file(self):
+        pass
+    def on_file_selection_changed(self):
+        pass
+    def update_ui_authenticated(self, x):
+        pass
+    def load_files(self):
+        pass
 
 
     def handle_authentication(self):
@@ -208,9 +295,10 @@ class FileSyncer(QMainWindow):
             print(f"An error occurred: {error}")
             file = None
 
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = FileSyncer()
+    window = MainWindow()
     window.show()
     sys.exit(app.exec_())
 

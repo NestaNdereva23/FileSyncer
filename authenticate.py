@@ -1,68 +1,73 @@
+import json
 import os.path
 import  logging
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QListWidget, QLineEdit, QPushButton, 
-                             QLabel, QMessageBox, QFileDialog)
-
-
+from typing import Optional, Tuple
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseDownload
-import time
-
+from database import DatabaseManager
 # from main import FileSyncer
 
-class Authenticate:
-    def __init__(self, parent=None):
-        self.parent = parent
-        
-        #Google Drive service and credentials
+#Google Drive service and cedentials
+class AuthManager:
+    def __init__(self, db_manager=DatabaseManager):
+        self.db_manager = db_manager
         self.service = None
         self.credentials = None
+        self.current_user_email = None
         self.SCOPES = ["https://www.googleapis.com/auth/drive"]
-        self.is_authenticated = False
+        self.CREDENTIALS_FILE = "credentials.json"
 
-    def update_auth_status(self, is_authenticated):
-        #update and return the authentication statis
-        self.is_authenticated = is_authenticated
-        return is_authenticated
+        #logging
+        logging.basicConfig(level=logging.INFO)
+        self.logger = logging.getLogger(__name__)
 
-    def try_to_authenticate(self):
-        #if creds exist try authenticating automatically
+    def initialize_session(self) -> bool:
         try:
-            if os.path.exists("token.json"):
-                creds = Credentials.from_authorized_user_file("token.json", self.SCOPES)
+            session = self.db_manager.get_active_user_session()
+            if session:
+                credentials_data = json.loads(session['credentials.json'])
+                creds = Credentials.from_authorized_user_info(credentials_data, self.SCOPES)
+
                 if creds and creds.valid:
                     self.service = build("drive", "v3", credentials=creds)
                     self.credentials = creds
-                    self.is_authenticated   #??
+                    self.current_user_email = session['user_email']
+                    self.logger.info(f"Restored session for user: {self.current_user_email}")
+                    return True
                 elif creds and creds.expired and creds.refresh_token:
                     creds.refresh(Request())
                     self.service = build("drive", "v3", credentials=creds)
                     self.credentials = creds
-                    self.update_auth_status(True)
-                    #Save the refreshed credentials
-                    with open("token.json", "w") as token:
-                        token.write(creds.to_json())
+                    self.current_user_email = session['user_email']
+
+                    #update stored credentials
+                    self.db_manager.save_user_session(
+                        self.current_user_email,
+                        creds.to_json()
+                    )
+                    self.logger.info(f"Refreshed session for user: {self.current_user_email}")
                     return True
             return False
         except Exception as e:
-            QMessageBox.critical(self.parent, "Error", f"Auto Authentication Failed: {str(e)}")
-            self.update_auth_status(False)
+            self.logger.info(f"Failed to initialize session: {str(e)}")
             return False
 
-    def authenticate_google_drive(self):
-        """Handle Google drive authentication"""
-
+    def authenticate(self) -> Tuple[bool, str]:
+        """Google drive authentication"""
         try:
+            if not os.path.exists(self.CREDENTIALS_FILE):
+                return False, "credentials.json file not found. Add your Google API credentials"
             creds = None
-            if os.path.exists("token.json"):
 
+            #try getting existing credentials
+            session = self.db_manager.get_active_user_session()
+            if session:
+                credentials_data = json.loads(session['credentials.json'])
                 creds = Credentials.from_authorized_user_file("token.json", self.SCOPES)
 
+            #if not valid creds start google Oauth flow
             if not creds or not creds.valid:
                 if creds and creds.expired and creds.refresh_token:
                     creds.refresh(Request())
@@ -71,17 +76,50 @@ class Authenticate:
                         "credentials.json", self.SCOPES)
                     creds = flow.run_local_server(port=0)
 
-                # save credentials
-                with open("token.json", "w") as token:
-                    token.write(creds.to_json())
+
             # Build e service
             self.service = build("drive", "v3", credentials=creds)
             self.credentials = creds
-            self.update_auth_status(True)
 
-            QMessageBox.information(self.parent, "Success", "Successfully authenticated with Google Drive!")
+            try:
+                about = self.service.about().get(fields="user").execute()
+                self.current_user_email = about['user']['emailAddress']
+            except Exception as e:
+                self.current_user_email = "unknown@example.com"
+                self.logger.info(f"Could not get user email: {str(e)}")
+
+            # Save session to db
+            self.db_manager.save_user_session(
+                self.current_user_email,
+                creds.to_json()
+            )
+            self.logger.info(f"Successfully authenticated user: {self.current_user_email}")
+            return True, f"Successfully authenticated as {self.current_user_email}"
+
+        except Exception as e:
+            error_message = f"Authentication failed: {str(e)}"
+            self.logger.error(error_message)
+            return False, error_message
+
+    def logout(self) -> bool:
+        """Logout current user"""
+        try:
+            if self.current_user_email:
+                self.db_manager.logout_user(self.current_user_email)
+                self.logger.info(f"Logged out user: {self.current_user_email}")
+
+            self.service = None
+            self.credentials = None
+            self.current_user_email = None
             return True
         except Exception as e:
-            self.update_auth_status(False)
-            QMessageBox.critical(self.parent, "Error", f"Google Failed to authenticate:{str(e)}")
+            self.logger.error(f"Logout failed: {str(e)}")
             return False
+
+    def is_authenticated(self) -> bool:
+        """Check if user is currently authenticated"""
+        return self.service is not None and self.current_user_email is not None
+
+    def get_current_user(self) -> Optional[str]:
+        """Get current user email"""
+        return self.current_user_email
