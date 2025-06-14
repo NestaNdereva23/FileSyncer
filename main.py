@@ -3,6 +3,8 @@ import mimetypes
 import sys
 import os
 import shutil
+from os import PRIO_PGRP
+
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QListWidget, QPushButton, QLabel, QMessageBox, QFileDialog,
@@ -13,7 +15,6 @@ import json
 from urllib.parse import unquote 
 from authenticate import AuthManager
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 from database import DatabaseManager
 from drive_manager import DriveManager
 
@@ -31,7 +32,7 @@ class FileOperationThread(QThread):
 
     def run(self):
         try:
-            result = self.operation(self.args, self.kwargs)
+            result = self.operation(*self.args, **self.kwargs)
             self.finished.emit(True, str(result))
         except Exception as e:
             self.finished.emit(False, str(e))
@@ -149,151 +150,167 @@ class MainWindow(QMainWindow):
             self.update_ui_authenticated(False)
             self.status_bar.showMessage("No previous session found")
 
+    def handle_authentication(self):
+        self.status_bar.showMessage("Authenticating......")
+        self.auth_button.setEnabled(False)
+
+        try:
+            success, message = self.auth_manager.authenticate()
+            if success:
+                self.update_ui_authenticated(True)
+                self.load_files()
+                QMessageBox.information(self, "Success", message)
+            else:
+                QMessageBox.critical(self, "Authentication Failed", message)
+                self.update_ui_authenticated(False)
+            self.status_bar.showMessage(message)
+        except Exception as e:
+            err_msg = f"Authentication error: {str(e)}"
+            QMessageBox.critical(self, "Error", err_msg)
+            self.status_bar.showMessage(err_msg)
+        finally:
+            self.auth_button.setEnabled(True)
+
+    def update_ui_authenticated(self, is_authenticated: bool):
+        if is_authenticated:
+            self.auth_status_label.setText("Authenticated")
+            self.auth_status_label.setStyleSheet("color: green; font-weight:bold")
+            self.user_info_label.setText(f"User: {self.auth_manager.get_current_user()}")
+            self.auth_button.setText("Re-authenticate")
+            self.logout_button.setEnabled(True)
+            self.refresh_button.setEnabled(True)
+            self.upload_button.setEnabled(True)
+        else:
+            self.auth_status_label.setText("NOt Authenticated")
+            self.auth_status_label.setStyleSheet("color: red; font-weight:bold")
+            self.user_info_label.setText(f"User: {self.auth_manager.get_current_user()}")
+            self.auth_button.setText("Authenticate")
+            self.logout_button.setEnabled(False)
+            self.refresh_button.setEnabled(False)
+            self.upload_button.setEnabled(False)
+
+    def load_files(self, use_cache: bool = True):
+        if not self.auth_manager.is_authenticated():
+            return
+
+        try:
+            self.status_bar.showMessage("Loading files.....")
+            print("loading")
+            files = self.drive_manager.list_files(use_cache=use_cache)
+            print("listing")
+            self.populate_files_list(files)
+            self.status_bar.showMessage(f"Loaded {len(files)} files")
+        except Exception as e:
+            err_msg = f"Failed to load files: {str(e)}"
+            QMessageBox.critical(self, "Error", err_msg)
+            self.status_bar.showMessage(err_msg)
+
+    def populate_files_list(self, files):
+        '''Populate file list widget'''
+        print("about to populate")
+        self.files_list.clear()
+
+        for file_info in files:
+            file_name = file_info.get('name', 'Unknown')
+            file_size = file_info.get('size', 0)
+
+            if file_size:
+                size_mb = int(file_size) / (1024*1024)
+                size_str = f" {size_mb:.2f}MB" if size_mb > 1 else f" {int(file_size)/1000} KB"
+            else:
+                size_str = ""
+
+            disp_text = f"{file_name}__{size_str}"
+            item = QListWidgetItem(disp_text)
+            item.setData(Qt.UserRole, file_info)
+            self.files_list.addItem(item)
+
     def handle_logout(self):
         pass
 
     def refresh_files(self):
-        pass
+        print("refreshing")
+        self.load_files(use_cache=False)
     def download_selected_file(self):
         pass
     def on_file_selection_changed(self):
-        pass
-    def update_ui_authenticated(self, x):
-        pass
-    def load_files(self):
-        pass
+        current_item = self.files_list.currentItem()
+        self.download_button.setEnabled(current_item is  not None and self.auth_manager.is_authenticated())
 
-
-    def handle_authentication(self):
-        auth_success = self.auth.authenticate_google_drive()
-        self.handle_auth_status(auth_success)
-
-    def handle_auth_status(self, is_authenticated):
-        """Update the UI based on authentication status"""
-        print(is_authenticated)
-        if is_authenticated:
-            self.auth_status_label.setText(" Authenticated with Google drive")
-            self.auth_status_label.setStyleSheet("color: green;")
-            self.upload_files_button.setEnabled(True)
-            self.authenticate_button.setText("Re-authenticate")
-        else:
-            self.auth_status_label.setText(" Not authenticated!!")
-            self.auth_status_label.setStyleSheet("color: red;")
-            self.upload_files_button.setEnabled(False)
-            self.authenticate_button.setText("Authenticate Google Drive")
+    def upload_file(self):
         pass
 
-    def sync_files(self):
-        if not self.auth.service:
-            QMessageBox.warning(self, "Not Authenticated", "Pleaase authenticate with Google")
-            return
-
-        self.list_drive_files()
-
-    #List drive files
-    def list_drive_files(self):
-        try:
-            #Call the drive api
-            result = (
-                self.auth.service.files()
-                .list(pageSize=10, fields="nextPageToken, files(id, name)")
-                .execute()
-            )
-            items = result.get("files", [])
-
-            if not items:
-                print("No files found.")
-                QMessageBox.information(self, "No Files", "No files found in Google Drive")
-                return
-            
-            print("Files:")
-            #clear the existing items
-            self.files_list.clear()
-
-            for item in items:
-                # # self.files_list.addItem(item['name'])
-                # self.files_list.addItems([item['name'], item['id']])
-                # print(item)
-                file_item = QListWidgetItem(item['name'])
-                file_item.setData(Qt.UserRole, item['id'])
-                self.files_list.addItem(file_item)
-
-        except HttpError as error:
-            QMessageBox.critical(self, "Google Drive Error", f"An error occurred: {error}")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to list files: {str(e)}")
-
-    def download_file(self):
-        current_file = self.files_list.currentItem()
-
-        if current_file:
-            file_id = current_file.data(Qt.UserRole)
-
-        # google drive download implem
-        try:
-            # get the file metadata before downloading
-            file_metadata = self.auth.service.files().get(fileId=file_id).execute()
-            filename = file_metadata['name']
-
-            # Create drive api client
-            with open(filename, 'wb') as file:
-                request = self.auth.service.files().get_media(fileId=file_id, supportsAllDrives=True)
-                file = io.BytesIO()
-                downloader = MediaIoBaseDownload(file, request)
-                done = False
-
-                while done is False:
-                    status, done = downloader.next_chunk()
-                    print(f"Download {int(status.progress() * 100)}%")
-
-                '''Write the data into the file'''
-                file.seek(0)
-                with open(filename, 'wb') as f:
-                    f.write(file.read())
-
-            QMessageBox.critical(self, "Download Success", f"Successfully downloaded the file {filename}")
-
-        except HttpError as error:
-            QMessageBox.critical(self, "Download Error", f"Failed to Download File: {str(error)}")
-            file = None
+    # def download_file(self):
+    #     current_file = self.files_list.currentItem()
+    #
+    #     if current_file:
+    #         file_id = current_file.data(Qt.UserRole)
+    #
+    #     # google drive download implem
+    #     try:
+    #         # get the file metadata before downloading
+    #         file_metadata = self.auth.service.files().get(fileId=file_id).execute()
+    #         filename = file_metadata['name']
+    #
+    #         # Create drive api client
+    #         with open(filename, 'wb') as file:
+    #             request = self.auth.service.files().get_media(fileId=file_id, supportsAllDrives=True)
+    #             file = io.BytesIO()
+    #             downloader = MediaIoBaseDownload(file, request)
+    #             done = False
+    #
+    #             while done is False:
+    #                 status, done = downloader.next_chunk()
+    #                 print(f"Download {int(status.progress() * 100)}%")
+    #
+    #             '''Write the data into the file'''
+    #             file.seek(0)
+    #             with open(filename, 'wb') as f:
+    #                 f.write(file.read())
+    #
+    #         QMessageBox.critical(self, "Download Success", f"Successfully downloaded the file {filename}")
+    #
+    #     except HttpError as error:
+    #         QMessageBox.critical(self, "Download Error", f"Failed to Download File: {str(error)}")
+    #         file = None
 
     # select a file from path
-    def select_file(self):
-        try:
-            file_path, _ = QFileDialog.getOpenFileUrl(None, "File")
-            file_url = file_path.toLocalFile()    # clean to get base file path
-            # selected_file_name = os.path.basename(file_url) # get base file name
-            if file_url:
-                self.upload_file(file_url)
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to select file: {str(e)}")
+    # def select_file(self):
+    #     try:
+    #         file_path, _ = QFileDialog.getOpenFileUrl(None, "File")
+    #         file_url = file_path.toLocalFile()    # clean to get base file path
+    #         # selected_file_name = os.path.basename(file_url) # get base file name
+    #         if file_url:
+    #             self.upload_file(file_url)
+    #
+    #     except Exception as e:
+    #         QMessageBox.critical(self, "Error", f"Failed to select file: {str(e)}")
 
     # upload selected File 
-    def upload_file(self, file_url):
-        print(f"ready to upload file at: {file_url}")
-        try:
-            file_name = os.path.basename(file_url)
-
-            #detect mime type
-            mime_type, _ = mimetypes.guess_type(file_url)
-            if mime_type is None:
-                mime_type = 'application/octet-stream'
-
-            print(f"Detected MIME type: {mime_type}")
-
-            file_metadata = {"name": file_name}
-            media = MediaFileUpload(file_url, mimetype=mime_type, resumable=True)
-
-            file = (
-                self.auth.service.files()
-                .create(body=file_metadata, media_body=media, fields="id")
-                .execute()
-            )
-            print(f'File with ID: "{file}" has been uploaded')
-        except HttpError as error:
-            print(f"An error occurred: {error}")
-            file = None
+    # def upload_file(self, file_url):
+    #     print(f"ready to upload file at: {file_url}")
+    #     try:
+    #         file_name = os.path.basename(file_url)
+    #
+    #         #detect mime type
+    #         mime_type, _ = mimetypes.guess_type(file_url)
+    #         if mime_type is None:
+    #             mime_type = 'application/octet-stream'
+    #
+    #         print(f"Detected MIME type: {mime_type}")
+    #
+    #         file_metadata = {"name": file_name}
+    #         media = MediaFileUpload(file_url, mimetype=mime_type, resumable=True)
+    #
+    #         file = (
+    #             self.auth.service.files()
+    #             .create(body=file_metadata, media_body=media, fields="id")
+    #             .execute()
+    #         )
+    #         print(f'File with ID: "{file}" has been uploaded')
+    #     except HttpError as error:
+    #         print(f"An error occurred: {error}")
+    #         file = None
 
 
 if __name__ == "__main__":
