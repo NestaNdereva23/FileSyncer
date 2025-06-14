@@ -84,12 +84,12 @@ class DatabaseManager:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                            SELECT user_email, credential_json, last_login
-                            FROM user_sessions
-                            WHERE is_active = TRUE
-                            ORDER BY last_login DESC
-                            LIMIT 1
-                         ''')
+                SELECT user_email, credentials_json, last_login
+                FROM user_sessions
+                WHERE is_active = TRUE
+                ORDER BY last_login DESC
+                LIMIT 1
+            ''')
             result = cursor.fetchone()
             if result:
                 return {
@@ -131,7 +131,7 @@ class DatabaseManager:
             cursor.execute('''
                 INSERT OR REPLACE INTO file_cache
                 (user_email, file_id, file_name, file_size, modified_time, mime_type)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
             ''', (user_email,
                   file_info.get('id'),
                   file_info.get('name'),
@@ -145,7 +145,7 @@ class DatabaseManager:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT file_id, file_name, file_size, modified_time, mime_type
+                SELECT file_id, file_name, file_size, modified_time, mime_type, cached_at
                 FROM file_cache
                 WHERE user_email = ?
                 ORDER BY cached_at DESC
