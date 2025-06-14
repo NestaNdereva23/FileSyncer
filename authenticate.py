@@ -27,7 +27,8 @@ class AuthManager:
         try:
             session = self.db_manager.get_active_user_session()
             if session:
-                credentials_data = json.loads(session['credentials.json'])
+                print("retrieving session")
+                credentials_data = json.loads(session['credentials_json'])
                 creds = Credentials.from_authorized_user_info(credentials_data, self.SCOPES)
 
                 if creds and creds.valid:
@@ -45,8 +46,7 @@ class AuthManager:
                     #update stored credentials
                     self.db_manager.save_user_session(
                         self.current_user_email,
-                        creds.to_json()
-                    )
+                        creds.to_json())
                     self.logger.info(f"Refreshed session for user: {self.current_user_email}")
                     return True
             return False
@@ -64,8 +64,8 @@ class AuthManager:
             #try getting existing credentials
             session = self.db_manager.get_active_user_session()
             if session:
-                credentials_data = json.loads(session['credentials.json'])
-                creds = Credentials.from_authorized_user_file("token.json", self.SCOPES)
+                credentials_data = json.loads(session['credentials_json'])
+                creds = Credentials.from_authorized_user_file(credentials_data, self.SCOPES)
 
             #if not valid creds start google Oauth flow
             if not creds or not creds.valid:
@@ -73,9 +73,8 @@ class AuthManager:
                     creds.refresh(Request())
                 else:
                     flow = InstalledAppFlow.from_client_secrets_file(
-                        "credentials.json", self.SCOPES)
+                        self.CREDENTIALS_FILE, self.SCOPES)
                     creds = flow.run_local_server(port=0)
-
 
             # Build e service
             self.service = build("drive", "v3", credentials=creds)
