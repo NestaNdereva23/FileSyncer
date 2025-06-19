@@ -58,7 +58,7 @@ class DatabaseManager:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_email TEXT,
                     file_id TEXT,
-                    file_name TEXT,
+                    file_name TEXT UNIQUE,
                     file_size INTEGER,
                     modified_time TEXT,
                     mime_type TEXT,
@@ -162,6 +162,7 @@ class DatabaseManager:
                 }
                 for row in results
             ]
+
 
 
 

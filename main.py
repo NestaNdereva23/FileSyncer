@@ -305,84 +305,13 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Download completed" if success else "Download failed")
 
     def refresh_files(self):
-        print("refreshing")
         self.load_files(use_cache=False)
     
     def on_file_selection_changed(self):
         current_item = self.files_list.currentItem()
         self.download_button.setEnabled(current_item is  not None and self.auth_manager.is_authenticated())
 
-    # def download_file(self):
-    #     current_file = self.files_list.currentItem()
-    #
-    #     if current_file:
-    #         file_id = current_file.data(Qt.UserRole)
-    #
-    #     # google drive download implem
-    #     try:
-    #         # get the file metadata before downloading
-    #         file_metadata = self.auth.service.files().get(fileId=file_id).execute()
-    #         filename = file_metadata['name']
-    #
-    #         # Create drive api client
-    #         with open(filename, 'wb') as file:
-    #             request = self.auth.service.files().get_media(fileId=file_id, supportsAllDrives=True)
-    #             file = io.BytesIO()
-    #             downloader = MediaIoBaseDownload(file, request)
-    #             done = False
-    #
-    #             while done is False:
-    #                 status, done = downloader.next_chunk()
-    #                 print(f"Download {int(status.progress() * 100)}%")
-    #
-    #             '''Write the data into the file'''
-    #             file.seek(0)
-    #             with open(filename, 'wb') as f:
-    #                 f.write(file.read())
-    #
-    #         QMessageBox.critical(self, "Download Success", f"Successfully downloaded the file {filename}")
-    #
-    #     except HttpError as error:
-    #         QMessageBox.critical(self, "Download Error", f"Failed to Download File: {str(error)}")
-    #         file = None
-
-    # select a file from path
-    # def select_file(self):
-    #     try:
-    #         file_path, _ = QFileDialog.getOpenFileUrl(None, "File")
-    #         file_url = file_path.toLocalFile()    # clean to get base file path
-    #         # selected_file_name = os.path.basename(file_url) # get base file name
-    #         if file_url:
-    #             self.upload_file(file_url)
-    #
-    #     except Exception as e:
-    #         QMessageBox.critical(self, "Error", f"Failed to select file: {str(e)}")
-
-    # upload selected File 
-    # def upload_file(self, file_url):
-    #     print(f"ready to upload file at: {file_url}")
-    #     try:
-    #         file_name = os.path.basename(file_url)
-    #
-    #         #detect mime type
-    #         mime_type, _ = mimetypes.guess_type(file_url)
-    #         if mime_type is None:
-    #             mime_type = 'application/octet-stream'
-    #
-    #         print(f"Detected MIME type: {mime_type}")
-    #
-    #         file_metadata = {"name": file_name}
-    #         media = MediaFileUpload(file_url, mimetype=mime_type, resumable=True)
-    #
-    #         file = (
-    #             self.auth.service.files()
-    #             .create(body=file_metadata, media_body=media, fields="id")
-    #             .execute()
-    #         )
-    #         print(f'File with ID: "{file}" has been uploaded')
-    #     except HttpError as error:
-    #         print(f"An error occurred: {error}")
-    #         file = None
+    
 
 
 if __name__ == "__main__":
