@@ -59,6 +59,8 @@ class DriveManager:
         #get file metadata
         try:
             file_metadata = self.auth_manager.service.files().get(fileId=file_id).execute()
+            filename = file_metadata['name']
+            print(filename)
             full_path = os.path.join(download_path, filename)
             request = self.auth_manager.service.files().get_media(fileId=file_id)
 
