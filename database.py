@@ -4,12 +4,18 @@ import json
 from datetime import datetime
 from typing import Optional, Dict, Any
 import logging
+from pathlib import Path
 
 class DatabaseManager:
     """Handles all database operations for the app"""
 
-    def __init__(self, db_path: str = "filesyncer.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[Path] = None):
+        if db_path is None:
+            self.db_path = Path.home() / '.filesyncer' / 'filesyncer.db'
+        else:
+            self.db_path = db_path
+
+        self.db_path.parent.mkdir(parents=True,exist_ok=True)
         self.init_database()
 
 

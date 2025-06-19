@@ -1,22 +1,19 @@
-import io
-import mimetypes
 import sys
 import os
-import shutil
-from os import PRIO_PGRP
-
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QListWidget, QPushButton, QLabel, QMessageBox, QFileDialog,
-    QListWidgetItem, QStatusBar, QMenuBar, QAction, QProgressBar
+    QListWidgetItem, QStatusBar, QMenuBar, QAction, QProgressBar,
 )
-from PyQt5.QtCore import Qt, QUrl, QThread, pyqtSignal
-import json
-from urllib.parse import unquote 
+from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from authenticate import AuthManager
-from googleapiclient.errors import HttpError
 from database import DatabaseManager
 from drive_manager import DriveManager
+
+
+basedir = os.path.dirname(__file__)
+
 
 #Base Class
 ''' Habdle file operations without blocking UI '''
@@ -316,6 +313,7 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setWindowIcon(QIcon(os.path.join(basedir, "icons", "filesyncer.svg")))
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
