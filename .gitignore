@@ -1,3 +1,6 @@
 .venv
 token.json
 credentials.json
+.idea/
+filesyncer.db
+__pycache__/
