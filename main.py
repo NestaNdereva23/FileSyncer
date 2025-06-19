@@ -226,19 +226,91 @@ class MainWindow(QMainWindow):
             self.files_list.addItem(item)
 
     def handle_logout(self):
-        pass
+        reply = QMessageBox.question(
+            self, 'Confirm Logout',
+            'Are you sure you want to logout?',
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            if self.auth_manager.logout():
+                self.update_ui_authenticated(False)
+                self.files_list.clear()
+                self.status_bar.showMessage("Logged out successfully")
+                QMessageBox.information(self, "Success", "Logged out success")
+            else:
+                QMessageBox.critical(self, "Error", "Failed to logout")
+
+    def upload_file(self):
+        ''' Upload file to google drive '''
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select File to Upload")
+
+        if file_path:
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)
+
+            self.upload_thread = FileOperationThread(
+                self.drive_manager.upload_file, file_path
+            )
+            self.upload_thread.finished.connect(self.on_upload_finished)
+            self.upload_thread.start()
+
+    def on_upload_finished(self, success: bool, message:str):
+        self.progress_bar.setVisible(False)
+
+        if success:
+            QMessageBox.information(self, "Success", f"File uploaded successfully!\n File ID: {message}")
+            self.refresh_files()
+        else:
+            QMessageBox.critical(self, "Upload Failed", message)
+
+        self.status_bar.showMessage("Upload completed" if success else "Upload failed")
+
+    def download_selected_file(self):
+    
+        current_item = self.files_list.currentItem()
+        if not current_item:
+            return
+
+        file_info = current_item.data(Qt.UserRole)
+        file_id = file_info.get('id')
+        file_name = file_info.get('name')
+
+        if not file_id or not file_name:
+            QMessageBox.warning(self, "Error", "Invalid file selection")
+            return
+        
+        download_path = QFileDialog.getExistingDirectory(self, "Select Dowload Location")
+        if not download_path:
+            return
+        
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)
+
+        self.download_thread = FileOperationThread(
+            self.drive_manager.download_file, file_id, file_name, download_path
+        )
+        self.download_thread.finished.connect(self.on_download_finished)
+        self.download_thread.start()
+
+    def on_download_finished(self, success:bool, message:str):
+        self.progress_bar.setVisible(False)
+
+
+        if success:
+            QMessageBox.information(self, "Success", f"File downloaded successfully!\n Saved to: {message}")
+            self.refresh_files()
+        else:
+            QMessageBox.critical(self, "Downlaod Failed", message)
+
+        self.status_bar.showMessage("Download completed" if success else "Download failed")
 
     def refresh_files(self):
         print("refreshing")
         self.load_files(use_cache=False)
-    def download_selected_file(self):
-        pass
+    
     def on_file_selection_changed(self):
         current_item = self.files_list.currentItem()
         self.download_button.setEnabled(current_item is  not None and self.auth_manager.is_authenticated())
-
-    def upload_file(self):
-        pass
 
     # def download_file(self):
     #     current_file = self.files_list.currentItem()

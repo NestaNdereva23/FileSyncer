@@ -100,7 +100,7 @@ class DriveManager:
                 mime_type = 'application/octet-stream'
 
             file_metadata = {"name": file_name}
-            media = MediaFileUpload(file_path, mime_type=mime_type, resumable=True)
+            media = MediaFileUpload(file_path, mimetype=mime_type, resumable=True)
 
             #upload
             file = (
